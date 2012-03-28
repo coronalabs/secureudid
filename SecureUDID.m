@@ -6,6 +6,10 @@
 //  Copyright (c) 2012 Crashlytics, Inc. All rights reserved.
 //  http://www.crashlytics.com
 //  info@crashlytics.com
+//  
+//  Support for MacOS by the Corona SDK team. Same licensing terms as original code.
+//  Copyright (c) 2012 Ansca, Inc. All rights reserved.
+//  http://www.coronasdk.com
 //
 
 /*
@@ -29,10 +33,49 @@
  */
 
 #import "SecureUDID.h"
-#import <UIKit/UIKit.h>
+
+#if TARGET_OS_IPHONE || TARGET_IPHONE_SIMULATOR
+#import <UIKit/UIPasteboard.h>
+typedef UIPasteboard ApplePasteboard;
+#else
+#import <AppKit/NSPasteboard.h>
+typedef NSPasteboard ApplePasteboard;
+#endif
+
 #import <CommonCrypto/CommonCryptor.h>
 #import <CommonCrypto/CommonKeyDerivation.h>
 #import <CommonCrypto/CommonDigest.h>
+
+
+#if TARGET_OS_IPHONE || TARGET_IPHONE_SIMULATOR
+#else
+@interface NSPasteboard(UIKitSelectors)
++ (NSPasteboard *)pasteboardWithName:(NSString *)pasteboardName create:(BOOL)create;
+- (NSData *)dataForPasteboardType:(NSString *)dataType;
+- (void)setData:(NSData *)data forPasteboardType:(NSString *)pasteboardType;
+@end
+
+@implementation NSPasteboard(UIKitSelectors)
+
++ (NSPasteboard *)pasteboardWithName:(NSString *)pasteboardName create:(BOOL)create
+{
+	return [NSPasteboard pasteboardWithName:pasteboardName];
+}
+
+- (NSData *)dataForPasteboardType:(NSString *)dataType
+{
+	return [self dataForType:dataType];
+}
+
+- (void)setData:(NSData *)data forPasteboardType:(NSString *)pasteboardType
+{
+	[self setData:data forType:pasteboardType];
+}
+
+@end
+
+#endif // TARGET_OS_IPHONE || TARGET_IPHONE_SIMULATOR
+
 
 #define SECURE_UDID_MAX_PASTEBOARD_ENTRIES (100)
 
@@ -44,7 +87,7 @@ NSString *const SUUIDPastboardFileFormat = @"org.secureudid-%d";
 NSData *cryptorToData(CCOperation operation, NSData *value, NSData *key);
 NSString *cryptorToString(CCOperation operation, NSData *value, NSData *key);
 NSString *pasteboardNameForNumber(NSInteger number);
-UIPasteboard *pasteboardForEncryptedDomain(NSData *encryptedDomain);
+ApplePasteboard *pasteboardForEncryptedDomain(NSData *encryptedDomain);
 
 @implementation SecureUDID
 
@@ -68,7 +111,7 @@ UIPasteboard *pasteboardForEncryptedDomain(NSData *encryptedDomain);
     
     // Encrypt the salted domain key and load the pasteboard on which to store data
     NSData *encryptedDomain = cryptorToData(kCCEncrypt, [domain dataUsingEncoding:NSUTF8StringEncoding], key);
-    UIPasteboard *pasteboard = pasteboardForEncryptedDomain(encryptedDomain);
+    ApplePasteboard *pasteboard = pasteboardForEncryptedDomain(encryptedDomain);
     
     // Read the storage dictionary out of the pasteboard data, or create a new one
     NSMutableDictionary *secureUDIDDictionary = nil;
@@ -162,8 +205,8 @@ NSString *pasteboardNameForNumber(NSInteger number) {
 
  Returns a pasteboard for the encrypted domain. If a pasteboard for the domain is not found a new one is created.
  */
-UIPasteboard *pasteboardForEncryptedDomain(NSData *encryptedDomain) {
-    UIPasteboard*        usablePasteboard;
+ApplePasteboard *pasteboardForEncryptedDomain(NSData *encryptedDomain) {
+    ApplePasteboard*        usablePasteboard;
     NSInteger            lowestUnusedIndex;
     NSInteger            ownerIndex;
     NSDate*              mostRecentDate;
@@ -179,13 +222,13 @@ UIPasteboard *pasteboardForEncryptedDomain(NSData *encryptedDomain) {
     // apps may have been deleted. To find a pasteboard owned by the the current
     // domain, iterate all of them.
     for (NSInteger i = 0; i < SECURE_UDID_MAX_PASTEBOARD_ENTRIES; ++i) {
-        UIPasteboard* pasteboard;
+        ApplePasteboard* pasteboard;
         NSDate*       modifiedDate;
         NSDictionary* dictionary;
         NSData*       pasteboardData;
         
         // If the pasteboard could not be found, notate that this is the first unused index.
-        pasteboard = [UIPasteboard pasteboardWithName:pasteboardNameForNumber(i) create:NO];
+        pasteboard = [ApplePasteboard pasteboardWithName:pasteboardNameForNumber(i) create:NO];
         if (!pasteboard) {
             if (lowestUnusedIndex == -1) {
                 lowestUnusedIndex = i;
@@ -195,7 +238,7 @@ UIPasteboard *pasteboardForEncryptedDomain(NSData *encryptedDomain) {
         }
         
         // If it was found, load and validate its payload
-        pasteboardData = [pasteboard valueForPasteboardType:SUUIDTypeDataDictionary];
+        pasteboardData = [pasteboard dataForPasteboardType:SUUIDTypeDataDictionary];
         if (!pasteboardData) {
             // corrupted slot
             if (lowestUnusedIndex == -1) {
@@ -240,9 +283,11 @@ UIPasteboard *pasteboardForEncryptedDomain(NSData *encryptedDomain) {
         [mostRecentDictionary setObject:[NSDate date]   forKey:SUUIDTimeStampKey];
         
         // Create and save the pasteboard.
-        usablePasteboard = [UIPasteboard pasteboardWithName:pasteboardNameForNumber(lowestUnusedIndex) create:YES];
+        usablePasteboard = [ApplePasteboard pasteboardWithName:pasteboardNameForNumber(lowestUnusedIndex) create:YES];
+#if TARGET_OS_IPHONE || TARGET_IPHONE_SIMULATOR
         usablePasteboard.persistent = YES;
-        
+#endif
+
         [usablePasteboard setData:[NSKeyedArchiver archivedDataWithRootObject:mostRecentDictionary]
                 forPasteboardType:SUUIDTypeDataDictionary];
     }
